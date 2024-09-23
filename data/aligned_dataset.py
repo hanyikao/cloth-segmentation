@@ -14,9 +14,13 @@ from PIL import Image
 
 import torch
 import torchvision.transforms as transforms
+import ast
 
 
 class AlignedDataset(BaseDataset):
+    def __init__(self, opt):
+        self.initialize(opt)
+    
     def initialize(self, opt):
         self.opt = opt
         self.image_dir = opt.image_folder
@@ -26,21 +30,28 @@ class AlignedDataset(BaseDataset):
 
         # for rgb imgs
 
-        transforms_list = []
-        transforms_list += [transforms.ToTensor()]
-        transforms_list += [Normalize_image(opt.mean, opt.std)]
-        self.transform_rgb = transforms.Compose(transforms_list)
+        # transforms_list = []
+        # transforms_list += [transforms.ToTensor()]
+        # transforms_list += [Normalize_image(opt.mean, opt.std)]
+        # self.transform_rgb = transforms.Compose(transforms_list)
+        self.transform_rgb = transforms.Compose([
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+            transforms.ToTensor(),
+            Normalize_image(opt.mean, opt.std),
+        ])
 
-        self.df = pd.read_csv(self.df_path)
+        # self.df = pd.read_csv(self.df_path)
         self.image_info = collections.defaultdict(dict)
-        self.df["CategoryId"] = self.df.ClassId.apply(lambda x: str(x).split("_")[0])
-        temp_df = (
-            self.df.groupby("ImageId")["EncodedPixels", "CategoryId"]
-            .agg(lambda x: list(x))
-            .reset_index()
-        )
-        size_df = self.df.groupby("ImageId")["Height", "Width"].mean().reset_index()
-        temp_df = temp_df.merge(size_df, on="ImageId", how="left")
+        # self.df["CategoryId"] = self.df.ClassId.apply(lambda x: str(x).split("_")[0]) # no effect in the 2019 dataset
+        # temp_df = (
+        #     self.df.groupby("ImageId")[["EncodedPixels", "CategoryId"]]
+        #     .agg(lambda x: list(x))
+        #     .reset_index()
+        # )
+        # size_df = self.df.groupby("ImageId")[["Height", "Width"]].mean().reset_index()
+        # temp_df = temp_df.merge(size_df, on="ImageId", how="left") # including columns of img id, rle mask, cls id, h, w
+        temp_df = pd.read_csv(self.df_path, converters={'EncodedPixels': ast.literal_eval, 'CategoryId': ast.literal_eval})
         for index, row in tqdm(temp_df.iterrows(), total=len(temp_df)):
             image_id = row["ImageId"]
             image_path = os.path.join(self.image_dir, image_id)
@@ -49,8 +60,8 @@ class AlignedDataset(BaseDataset):
             self.image_info[index]["width"] = self.width
             self.image_info[index]["height"] = self.height
             self.image_info[index]["labels"] = row["CategoryId"]
-            self.image_info[index]["orig_height"] = row["Height"]
-            self.image_info[index]["orig_width"] = row["Width"]
+            self.image_info[index]["orig_height"] = int(row["Height"])
+            self.image_info[index]["orig_width"] = int(row["Width"])
             self.image_info[index]["annotations"] = row["EncodedPixels"]
 
         self.dataset_size = len(self.image_info)
@@ -117,32 +128,45 @@ class AlignedDataset(BaseDataset):
         first_channel = np.zeros((self.width, self.height), dtype=np.uint8)
         second_channel = np.zeros((self.width, self.height), dtype=np.uint8)
         third_channel = np.zeros((self.width, self.height), dtype=np.uint8)
+        fourth_channel = np.zeros((self.width, self.height), dtype=np.uint8)
+        fifth_channel = np.zeros((self.width, self.height), dtype=np.uint8)
 
-        upperbody = [0, 1, 2, 3, 4, 5]
-        lowerbody = [6, 7, 8]
-        wholebody = [9, 10, 11, 12]
+        # upperbody = [0, 1, 2, 3, 4, 5]
+        # lowerbody = [6, 7, 8]
+        # wholebody = [9, 10, 11, 12]
+        tops = [0, 1]
+        sweater = [2, 3]
+        outerwear = [4, 5, 9]
+        bottoms = [6, 7, 8]
+        wholebody = [10, 11, 12]
 
         for i in range(len(labels)):
-            if labels[i] in upperbody:
+            if labels[i] in tops:
                 first_channel += new_masks[i]
-            elif labels[i] in lowerbody:
+            elif labels[i] in sweater:
                 second_channel += new_masks[i]
-            elif labels[i] in wholebody:
+            elif labels[i] in outerwear:
                 third_channel += new_masks[i]
+            elif labels[i] in bottoms:
+                fourth_channel += new_masks[i]
+            elif labels[i] in wholebody:
+                fifth_channel += new_masks[i]
 
         first_channel = (first_channel > 0).astype("uint8")
         second_channel = (second_channel > 0).astype("uint8")
         third_channel = (third_channel > 0).astype("uint8")
+        fourth_channel = (fourth_channel > 0).astype("uint8")
+        fifth_channel = (fifth_channel > 0).astype("uint8")
 
-        final_label = first_channel + second_channel * 2 + third_channel * 3
-        conflict_mask = (final_label <= 3).astype("uint8")
+        final_label = first_channel + second_channel * 2 + third_channel * 3 + fourth_channel * 4 + fifth_channel * 5
+        conflict_mask = (final_label <= 5).astype("uint8")
         final_label = (conflict_mask) * final_label + (1 - conflict_mask) * 1
         target_tensor = torch.as_tensor(final_label, dtype=torch.int64)
 
         return image_tensor, target_tensor
 
     def __len__(self):
-        return len(self.image_info)
+        return self.dataset_size
 
     def name(self):
         return "AlignedDataset"

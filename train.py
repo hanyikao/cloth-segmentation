@@ -32,8 +32,11 @@ from utils.tensorboard_utils import board_add_images
 from utils.saving_utils import save_checkpoints
 from utils.saving_utils import load_checkpoint, load_checkpoint_mgpu
 from utils.distributed import get_world_size, set_seed, synchronize, cleanup
+from utils.metric import SegmentationMetrics
 
 from networks import U2NET
+from tqdm import tqdm
+from eval import evaluation
 
 
 def options_printing_saving(opt):
@@ -61,7 +64,7 @@ def training_loop(opt):
         device = torch.device("cuda:0")
         local_rank = 0
 
-    u_net = U2NET(in_ch=3, out_ch=4)
+    u_net = U2NET(in_ch=3, out_ch=6)
     if opt.continue_train:
         u_net = load_checkpoint(u_net, opt.unet_checkpoint)
     u_net = u_net.to(device)
@@ -73,7 +76,7 @@ def training_loop(opt):
             print(u_net, file=outfile)
 
     if opt.distributed:
-        u_net = nn.parallel.DistributedDataParallel(
+        u_net = DDP(
             u_net,
             device_ids=[local_rank],
             output_device=local_rank,
@@ -83,30 +86,31 @@ def training_loop(opt):
 
     # initialize optimizer
     optimizer = optim.Adam(
-        u_net.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=0
+        u_net.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-5
     )
 
     custom_dataloader = CustomDatasetDataLoader()
     custom_dataloader.initialize(opt)
-    loader = custom_dataloader.get_loader()
+    trainloader, validloader = custom_dataloader.get_loader()
 
     if local_rank == 0:
-        dataset_size = len(custom_dataloader)
-        print("Total number of images avaliable for training: %d" % dataset_size)
+        # dataset_size = len(custom_dataloader)
+        # print("Total number of images avaliable for training: %d" % dataset_size)
         writer = SummaryWriter(opt.logs_dir)
         print("Entering training loop!")
 
     # loss function
-    weights = np.array([1, 1.5, 1.5, 1.5], dtype=np.float32)
+    weights = np.array([1, 1.5, 1.5, 1.5, 1.5, 1.5], dtype=np.float32)
     weights = torch.from_numpy(weights).to(device)
     loss_CE = nn.CrossEntropyLoss(weight=weights).to(device)
 
-    pbar = range(opt.iter)
-    get_data = sample_data(loader)
+    pbar = range(1, opt.iter+1)
+    get_data = sample_data(trainloader)
 
     start_time = time.time()
     # Main training loop
     for itr in pbar:
+        u_net.train()
         data_batch = next(get_data)
         image, label = data_batch
         image = Variable(image.to(device))
@@ -122,26 +126,33 @@ def training_loop(opt):
         loss4 = loss_CE(d4, label)
         loss5 = loss_CE(d5, label)
         loss6 = loss_CE(d6, label)
-        del d1, d2, d3, d4, d5, d6
-
         total_loss = loss0 * 1.5 + loss1 + loss2 + loss3 + loss4 + loss5 + loss6
 
-        for param in u_net.parameters():
-            param.grad = None
+        # for param in u_net.parameters():
+        #     param.grad = None
 
         total_loss.backward()
         if opt.clip_grad != 0:
             nn.utils.clip_grad_norm_(u_net.parameters(), opt.clip_grad)
         optimizer.step()
 
+        del d1, d2, d3, d4, d5, d6
+        torch.cuda.empty_cache()
+
         if local_rank == 0:
             # printing and saving work
             if itr % opt.print_freq == 0:
+                metric_calculator = SegmentationMetrics(average=True, ignore_background=True)
+                pixel_accuracy, dice, precision, recall = metric_calculator(label, d0)
+
                 pprint.pprint(
-                    "[step-{:08d}] [time-{:.3f}] [total_loss-{:.6f}]  [loss0-{:.6f}]".format(
-                        itr, time.time() - start_time, total_loss, loss0
+                    "[step-{:08d}] [time-{:.3f}] [total_loss-{:.6f}] [loss0-{:.6f}]".format(
+                        itr, time.time() - start_time, total_loss, loss0, pixel_accuracy, dice, precision, recall
                     )
                 )
+
+                writer.add_scalar("total_loss", total_loss, itr)
+                writer.add_scalar("loss0", loss0, itr)
 
             if itr % opt.image_log_freq == 0:
                 d0 = F.log_softmax(d0, dim=1)
@@ -149,16 +160,21 @@ def training_loop(opt):
                 visuals = [[image, torch.unsqueeze(label, dim=1) * 85, d0 * 85]]
                 board_add_images(writer, "grid", visuals, itr)
 
-            writer.add_scalar("total_loss", total_loss, itr)
-            writer.add_scalar("loss0", loss0, itr)
-
             if itr % opt.save_freq == 0:
                 save_checkpoints(opt, itr, u_net)
 
+                evaluation(u_net, validloader, loss_CE, itr, start_time, device)
+                
+                writer.add_scalar("val_total_loss", total_loss, itr)
+                writer.add_scalar("val_loss0", loss0, itr)
+                writer.add_scalar("val_dice", dice, itr)
+                writer.add_scalar("val_precision", precision, itr)
+                writer.add_scalar("val_recall", recall, itr)
+
     print("Training done!")
-    if local_rank == 0:
-        itr += 1
-        save_checkpoints(opt, itr, u_net)
+    # if local_rank == 0:
+    #     itr += 1
+    #     save_checkpoints(opt, itr, u_net)
 
 
 if __name__ == "__main__":

@@ -43,3 +43,25 @@ def save_checkpoints(opt, itr, net):
         net,
         os.path.join(opt.save_dir, "checkpoints", "itr_{:08d}_u2net.pth".format(itr)),
     )
+
+
+def check_or_download_model(file_path):
+    import gdown
+    if not os.path.exists(file_path):
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        url = "https://drive.google.com/uc?id=11xTBALOeUkyuaK3l60CpkYHLTmv7k3dY"
+        gdown.download(url, file_path, quiet=False)
+        print("Model downloaded successfully.")
+    else:
+        print("Model already exists.")
+
+
+def load_seg_model(checkpoint_path, device='cpu'):
+    from networks import U2NET
+    net = U2NET(in_ch=3, out_ch=6)
+    check_or_download_model(checkpoint_path)
+    # net = load_checkpoint_mgpu(net, checkpoint_path)
+    net = load_checkpoint(net, checkpoint_path)
+    net = net.to(device)
+    net = net.eval()
+    return net
