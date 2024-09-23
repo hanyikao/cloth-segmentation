@@ -1,3 +1,30 @@
+# Usage
+
+Here clothes are parsed into 1+5 category: 
+
+|Class Name|Color|
+|   :-:  |  :-:  |
+|    tops   |  red |
+|   sweater | green|
+| outerwear |yellow|
+|  bottoms  | blue |
+| wholebody |purple|
+
++ There are 3 csv files in the repository
+    - `train_male.csv`: use gender detection to first filter useful images, then mix with custom outerwear data
+    - `eval.csv`: 30 custom and annotated outwear data for evaluation
+    - `taelor.csv`: 100 annotated data from all classes except wholebody
++ `eval.py`: it can be run when the data and label are both available
+
+Todo:
+- [ ] save the segmentation result correctly in `eval.py`
+- [ ] modify `aligned_dataset.py` (choices for data augmentation, dataframe creation)
+- [ ] modify `base_options.py` (can override the parameters in terminal)
+
+---
+
+> Original README
+
 # Clothes Segmentation using U2NET #
 
 ![Python 3.8](https://img.shields.io/badge/python-3.8-green.svg)
