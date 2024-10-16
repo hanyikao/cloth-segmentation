@@ -187,3 +187,38 @@ class Normalize_image(object):
 
         else:
             assert "Please set proper channels! Normlization implemented only for 1, 3 and 18"
+
+
+class Denormalize_image(object):
+    """Denormalize given tensor into given mean and standard dev
+
+    Args:
+        mean (float): Desired mean to substract from tensors
+        std (float): Desired std to divide from tensors
+    """
+
+    def __init__(self, mean, std):
+        assert isinstance(mean, (float))
+        if isinstance(mean, float):
+            self.mean = mean
+
+        if isinstance(std, float):
+            self.std = std
+
+        self.normalize_1 = transforms.Normalize(-self.mean / self.std, 1.0 / self.std)
+        self.normalize_3 = transforms.Normalize([-self.mean / self.std] * 3, [1.0 / self.std] * 3)
+        self.normalize_18 = transforms.Normalize([-self.mean / self.std] * 18, [1.0 / self.std] * 18)
+        self.toDtype = transforms.ConvertImageDtype(torch.uint8)
+
+    def __call__(self, image_tensor):
+        if image_tensor.shape[1] == 1:
+            return transforms.Compose([self.normalize_1, self.toDtype])(image_tensor)
+
+        elif image_tensor.shape[1] == 3:
+            return transforms.Compose([self.normalize_3, self.toDtype])(image_tensor)
+
+        elif image_tensor.shape[1] == 18:
+            return transforms.Compose([self.normalize_18, self.toDtype])(image_tensor)
+
+        else:
+            assert "Please set proper channels! Normlization implemented only for 1, 3 and 18"

@@ -6,9 +6,9 @@ class parser(object):
     def __init__(self):
         self.name = "training_cloth_segm_u2net_exp1"  # Expriment name
         # self.image_folder = "../imaterialist/train/"  # image folder path
-        self.image_folder = "../imaterialist/train_male/"  # image folder path
+        self.image_folder = "../imaterialist/taelor/"  # image folder path
         # self.df_path = "../imaterialist/train.csv"  # label csv path
-        self.df_path = "./eval.csv"  # label csv path
+        self.df_path = "./taelor.csv"  # label csv path
         self.distributed = False  # True for multi gpu training
 
         self.fine_width = 192 * 4
@@ -37,3 +37,4 @@ class parser(object):
 
         self.logs_dir = osp.join("logs", self.name)
         self.save_dir = osp.join("results", self.name)
+        self.test = True

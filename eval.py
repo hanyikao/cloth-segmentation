@@ -2,15 +2,17 @@ import numpy as np
 import torch
 import time
 import os
+from data.base_dataset import Denormalize_image
 
-def evaluation(model, dataloader, loss_func, itr=0, start_time=0, device="cuda:0"):
+def evaluation(model, dataloader, loss_func, opt, itr=0, start_time=0, device="cuda:0", scaler_list=[]):
     import pprint
     from tqdm import tqdm
     from PIL import Image
-    from infer import palette, result_dir
+    from infer import get_palette
     from utils.metric import SegmentationMetrics
     import matplotlib.pyplot as plt
 
+    palette = get_palette(6)
     model.eval()
     loss_list, metric_list = [], []
     with torch.no_grad():
@@ -38,24 +40,23 @@ def evaluation(model, dataloader, loss_func, itr=0, start_time=0, device="cuda:0
 
 
             output_tensor = torch.nn.functional.log_softmax(d0, dim=1)
-            output_tensor = torch.max(output_tensor, dim=1, keepdim=True)[1]
-            output_tensor = output_tensor[0][0]
+            output_tensor = torch.max(output_tensor, dim=1, keepdim=False)[1]
+            output_tensor = output_tensor[-1]
             output_arr = output_tensor.cpu().numpy()
 
             output = Image.fromarray(output_arr.astype("uint8"), mode="L")
             output.putpalette(palette)
             output = output.convert("RGB")
 
-            img = Image.fromarray((image[0].cpu().numpy() * 255).astype("uint8").transpose(1,2,0))
-            plt.imshow(img)
-            overlayed = Image.fromarray(label[0].cpu().numpy(), mode="L")
+            img = Image.fromarray(Denormalize_image(opt.mean, opt.std)(image.cpu())[-1].numpy().transpose(1,2,0)).convert('RGB')
+            overlayed = Image.fromarray(label[-1].cpu().numpy().astype("uint8"), mode="L")
             overlayed.putpalette(palette)
             overlayed = overlayed.convert("RGB")
             combined = Image.new('RGB', (img.width + overlayed.width + output.width, max(img.height, overlayed.height, output.height)))
             combined.paste(img, (0, 0))
             combined.paste(overlayed, (img.width, 0))
             combined.paste(output, (img.width + overlayed.width, 0))
-            combined.save(os.path.join(result_dir, str(idx) + ".png"))
+            combined.save(os.path.join(opt.save_dir, "images", str(idx) + ".png"))
             idx += 1
 
 
@@ -67,30 +68,33 @@ def evaluation(model, dataloader, loss_func, itr=0, start_time=0, device="cuda:0
                 itr, time.time() - start_time, total_loss, loss0, dice, precision, recall
             )
         )
+        scaler_list.extend([total_loss, loss0, dice, precision, recall])
 
 
 if __name__ == '__main__':
-    from data.custom_dataset_data_loader import CustomDatasetDataLoader
+    from data.custom_dataset_data_loader import CustomTestDataLoader
     from utils.saving_utils import load_seg_model
-    from options.base_options import parser
+    # from options.base_options import parser
+    from options.argparse_opt import parser
     from utils.distributed import set_seed
     
     start_time = time.time()
-    opt = parser()
+    opt = parser().get_options()
     device = torch.device("cuda:0")
-    checkpoint_path = "results/training_cloth_segm_u2net_exp1/checkpoints/itr_00097000_u2net.pth"
+    checkpoint_path = "results/training_cloth_segm_u2net_exp5/checkpoints/itr_00021000_u2net.pth"
     u_net = load_seg_model(checkpoint_path, device)
     u_net = u_net.to(device)
+    
+    set_seed(1000)
 
-    custom_dataloader = CustomDatasetDataLoader()
+    custom_dataloader = CustomTestDataLoader()
     custom_dataloader.initialize(opt)
-    trainloader, validloader = custom_dataloader.get_loader()
+    validloader = custom_dataloader.get_loader()
 
     # loss function
     weights = np.array([1, 1.5, 1.5, 1.5, 1.5, 1.5], dtype=np.float32)
     weights = torch.from_numpy(weights).to(device)
     loss_CE = torch.nn.CrossEntropyLoss(weight=weights).to(device)
 
-    set_seed(1000)
-    evaluation(u_net, validloader, loss_CE, start_time=start_time, device=device)
+    evaluation(u_net, validloader, loss_CE, opt, start_time=start_time, device=device)
     print("Exiting..............")

@@ -26,8 +26,8 @@ from torchvision import models
 
 from data.custom_dataset_data_loader import CustomDatasetDataLoader, sample_data
 
-
-from options.base_options import parser
+# from options.base_options import parser
+from options.argparse_opt import parser
 from utils.tensorboard_utils import board_add_images
 from utils.saving_utils import save_checkpoints
 from utils.saving_utils import load_checkpoint, load_checkpoint_mgpu
@@ -89,6 +89,8 @@ def training_loop(opt):
         u_net.parameters(), lr=opt.lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-5
     )
 
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.95, patience=300, verbose=True)
+
     custom_dataloader = CustomDatasetDataLoader()
     custom_dataloader.initialize(opt)
     trainloader, validloader = custom_dataloader.get_loader()
@@ -146,30 +148,35 @@ def training_loop(opt):
                 pixel_accuracy, dice, precision, recall = metric_calculator(label, d0)
 
                 pprint.pprint(
-                    "[step-{:08d}] [time-{:.3f}] [total_loss-{:.6f}] [loss0-{:.6f}]".format(
+                    "[step-{:08d}] [time-{:.3f}] [total_loss-{:.6f}] [loss0-{:.6f}] [dice-{:.4f}] [precision-{:.4f}] [recall-{:.4f}]".format(
                         itr, time.time() - start_time, total_loss, loss0, pixel_accuracy, dice, precision, recall
                     )
                 )
 
+                writer.add_scalar("learning_rate", optimizer.param_groups[0]['lr'], itr)
                 writer.add_scalar("total_loss", total_loss, itr)
                 writer.add_scalar("loss0", loss0, itr)
 
             if itr % opt.image_log_freq == 0:
                 d0 = F.log_softmax(d0, dim=1)
                 d0 = torch.max(d0, dim=1, keepdim=True)[1]
-                visuals = [[image, torch.unsqueeze(label, dim=1) * 85, d0 * 85]]
+                visuals = [[image.cpu(), torch.unsqueeze(label.cpu(), dim=1) * 23, d0 * 23]]
                 board_add_images(writer, "grid", visuals, itr)
 
             if itr % opt.save_freq == 0:
                 save_checkpoints(opt, itr, u_net)
 
-                evaluation(u_net, validloader, loss_CE, itr, start_time, device)
+                scaler_list = []
+                evaluation(u_net, validloader, loss_CE, opt, itr, start_time, device, scaler_list)
+                total_loss, loss0, dice, precision, recall = scaler_list
                 
                 writer.add_scalar("val_total_loss", total_loss, itr)
                 writer.add_scalar("val_loss0", loss0, itr)
                 writer.add_scalar("val_dice", dice, itr)
                 writer.add_scalar("val_precision", precision, itr)
                 writer.add_scalar("val_recall", recall, itr)
+
+            scheduler.step(total_loss)
 
     print("Training done!")
     # if local_rank == 0:
@@ -179,7 +186,7 @@ def training_loop(opt):
 
 if __name__ == "__main__":
 
-    opt = parser()
+    opt = parser().get_options()
 
     if opt.distributed:
         if int(os.environ.get("LOCAL_RANK")) == 0:
