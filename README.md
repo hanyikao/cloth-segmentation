@@ -11,15 +11,18 @@ Here clothes are parsed into 1+5 category:
 | wholebody |purple|
 
 + There are 3 csv files in the repository
-    - `train_male.csv`: use gender detection to first filter useful images, then mix with custom outerwear data
-    - `eval.csv`: 30 custom and annotated outwear data for evaluation
-    - `taelor.csv`: 100 annotated data from all classes except wholebody
-+ `eval.py`: it can be run when the data and label are both available
+    - `train_male.csv`: use gender detection to first filter useful images, then mix with custom outerwear data (uncompressed rle)
+    - ~~`eval.csv`: 30 custom and annotated outwear data for evaluation~~
+    - `taelor.csv`: 200 annotated data from all classes except wholebody (coco format)
++ `eval.py`: it can be run when the data and label are both available; you may manually modify the checkpoint_path to load model
++ `infer.py`: it loads image directly without label; you may manually modify the image_dir, result_dir and checkpoint_path
++ `aligned_dataset.py`: the repo now uses the **coco format** for annotations, so the csv file serves as the mapping of fname to idx
++ `custom_dataset_data_loader.py`: use random_split to the AlignedDataset, fix 15% of data for valid_size
 
 Todo:
-- [ ] save the segmentation result correctly in `eval.py`
-- [ ] modify `aligned_dataset.py` (choices for data augmentation, dataframe creation)
-- [ ] modify `base_options.py` (can override the parameters in terminal)
+- [X] save the segmentation result correctly in `eval.py`
+- [ ] modify `aligned_dataset.py` ~~(choices for data augmentation, dataframe creation)~~
+- [X] modify `base_options.py` (can override the parameters in terminal)
 
 ---
 
