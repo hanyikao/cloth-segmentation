@@ -1,5 +1,21 @@
 # Usage
 
+```
+├── cloth-segmentation
+│   ├── assets
+│   ├── data
+│   ├── networks
+│   ├── options
+│   ├── prev_checkpoints
+│   ├── results
+│   ├── runs
+│   │   └── labelme2coco
+│   ├── utils
+├── imaterialist
+│   ├── test
+│   ├── train
+```
+
 Here clothes are parsed into 1+5 category: 
 
 |Class Name|Color|
